@@ -1,0 +1,28 @@
+body {
+	background: #dddddd;
+	color: #4a665f;
+  font-family: monospace;
+}
+
+a { color: #9b6535; }
+
+#menuContent {
+	margin-left: 10px;
+  position: absolute;
+  width: 100px;
+}
+
+.menuListHeader {
+	margin-bottom: 6px;
+  margin-top: 8px;
+}
+
+.menuEverything {
+  margin-top: 20px;
+}
+
+#mainContent {
+	margin-left: 134px;
+  position: relative;
+  white-space: pre;
+}
