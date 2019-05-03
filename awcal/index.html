@@ -5,14 +5,17 @@
     <meta charset="utf-8" />
   </head>
   <body>
-    <img src="awbear.gif" style="float: right;">
+    <img src="awbear.gif" style="position: absolute; right: 0; z-index: -1;">
 
     <!--Add buttons to initiate auth sequence and sign out-->
     <button id="authorize_button" style="display: none;">Click here to sign into Google Calendar</button>
     <button id="signout_button" style="display: none;">Sign Out</button>
+    <div></div>
+    <p>Choose a calendar:
+    <select id="select_cal" onChange="javascript:loadSelectedCal();"><option>Sign in first!</option></select>
+    </p>
 
-    <pre id="content" style="white-space: pre-wrap;"></pre>
-
+    <iframe id="myIframe" style="border: 0;" width="640" height="480" frameborder="0" scrolling="no"></iframe>
     <script type="text/javascript">
       // Client ID and API key from the Developer Console
       var CLIENT_ID = '273322583785-7onemib94f54kievfcm4if2gqbs7fl9e.apps.googleusercontent.com';
@@ -27,6 +30,8 @@
 
       var authorizeButton = document.getElementById('authorize_button');
       var signoutButton = document.getElementById('signout_button');
+
+      var calendars = []
 
       /**
        *  On load, called to load the auth2 library and API client library.
@@ -87,16 +92,25 @@
         gapi.auth2.getAuthInstance().signOut();
       }
 
-      /**
-       * Append a pre element to the body containing the given message
-       * as its text node. Used to display the results of the API call.
-       *
-       * @param {string} message Text to be placed in pre element.
-       */
-      function appendPre(message) {
-        var pre = document.getElementById('content');
-        var textContent = document.createTextNode(message + '\n');
-        pre.appendChild(textContent);
+      function addCalendar(calendar) {
+        var s = document.getElementById("select_cal");
+        var option = document.createElement("option");
+        option.text = calendar.summary;
+        s.add(option);
+      }
+
+      function emptySelectCal() {
+        var s =  document.getElementById("select_cal");
+        var toRemove = s.length;
+        for (i = 0; i < toRemove; i++) {
+          s.remove(0);
+        }
+      }
+
+      function loadSelectedCal() {
+        var s =  document.getElementById("select_cal");
+        cal = calendars[s.selectedIndex]
+        document.getElementById('myIframe').src = "https://calendar.google.com/calendar/embed?src=" + cal.id;
       }
 
       /**
@@ -109,16 +123,14 @@
           'minAccessRol': 'writer',
           'maxResults': 250,
         }).then(function(response) {
-          var items = response.result.items;
-          appendPre('Calendars you can add events to:\n');
-
-          if (items.length > 0) {
-            for (i = 0; i < items.length; i++) {
-              var item = items[i];
-              appendPre(item.summary)
+          emptySelectCal();
+          calendars = response.result.items;
+          if (calendars.length > 0) {
+            for (i = 0; i < calendars.length; i++) {
+              var item = calendars[i];
+              addCalendar(item)
             }
-          } else {
-            appendPre('No calendars found.');
+            loadSelectedCal()
           }
         });
       }
