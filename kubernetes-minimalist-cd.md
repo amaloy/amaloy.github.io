@@ -5,15 +5,15 @@ In this article we're going to talk about a way to use Kubernetes as the last le
 We'll define continuous deployment, in the context of Kubernetes, as having the following behaviors upon deployment of a new version of an application:
 
 * The old version goes away automatically.
-* The rollout (switching from old to new) happens in a blue-green fashion.
 * There is the ability to easily rollback to the old version.
+* The rollout happens without downtime.
 
 ## The Application
 
 We won't be creating any container images from scratch since there are images created by the community that will illustrate the behavior well enough:
 
-* gcr.io/hello-minikube-zero-install/hello-node from [here](https://kubernetes.io/docs/tutorials/hello-minikube/), which will act as the "old version" of the application
-* k8s.gcr.io/echoserver:1.4 from [here](https://github.com/kubernetes/minikube/blob/master/README.md), which will act as the "new version"
+* gcr.io/hello-minikube-zero-install/hello-node (originally from [here](https://kubernetes.io/docs/tutorials/hello-minikube/)), which will act as the "old version" of the application
+* k8s.gcr.io/echoserver:1.4 (originally from [here](https://github.com/kubernetes/minikube/blob/master/README.md)), which will act as the "new version"
 
 The application will use a Kubernetes [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/), shown in YAML format below. Deployments have features that are essential for the behaviors we're looking for.
 ```
@@ -42,8 +42,6 @@ spec:
 Save the Deployment as `my-cd-app.yaml`.
 
 ## The Simple Case
-
-We're going to forego blue-green behavior for the moment and just look at what happens when we deploy a new version of our application. 
 
 First, deploy the "old version":
 ```
@@ -75,7 +73,7 @@ kubectl get pods -w
 ```
 This will help us get a record of what happens when we deploy a new version.
 
-Edit `my-cd-app.yaml` and replace the old `image` value with the "new version" application: `k8s.gcr.io/echoserver:1.4` Imagine this as a change that was just merged to your source code repository's master branch.
+Edit `my-cd-app.yaml` and replace the old `image` value with the "new version" application: `k8s.gcr.io/echoserver:1.4` Imagine this as a change that was just merged to your code repository's master branch.
 
 Switch back to your previous terminal and deploy the new version:
 ```
@@ -162,14 +160,100 @@ my-cd-app-6d5bf8d76-2g7kh   1/1       Terminating   0         35m
 ```
 As before, the existing Pod (new version) was terminated and a new Pod (old version) was created. You can use the port-forwarding to check that the result in your web browser is once again `Hello World!`.
 
-Running `kubectl get all` again shows that ReplicaSet `rs/my-cd-app-6d5bf8d76` no longer has any Pods and `rs/my-cd-app-7c5bd7694f` once again does.
+Running `kubectl get all` again shows that "new" ReplicaSet no longer has any Pods and the "old" one once again does.
 
 This is another behavior we get for free with Deployments. This is only the most basic case, but see the [Deployments documentation](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) for many more options.
 
-## Blue-Green Rollout
+## Blue-Green(ish) Rollout
+
+Here we're going to discuss configuration that will give us a best-effort blue-green rollout of a new version.
 
 Before proceeding, delete the Deployment from Kubernetes so we can start fresh:
 ```
 $ kubectl delete deployment my-cd-app
 deployment "my-cd-app" deleted
 ```
+
+Here's the updated version of `my-cd-app.yaml` that we're going to use:
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-cd-app
+  labels:
+    app: my-cd-app
+spec:
+  strategy: 
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 100%
+  minReadySeconds: 10
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-cd-app
+  template:
+    metadata:
+      labels:
+        app: my-cd-app
+    spec:
+      containers:
+      - name: my-cd-app
+        image: gcr.io/hello-minikube-zero-install/hello-node
+        ports:
+        - containerPort: 8080
+```
+Here's what's changed:
+
+* Before there was only 1 replica, but most cases would likely have more, so now there's 3.
+* The Deployment has a customized [RollingUpdate strategy](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment):
+  * `maxUnavailable: 0` means that we don't want any of the old Pods to go away until there are new ones that are available.
+  * `maxSurge: 100%` means that 3 Pods of the new version will be brought up even while there are 3 Pods of the old version (for a max total of 6 Pods).
+* `minReadySeconds: 10` means that the new Pods won't be considered available until they've been [ready](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes) for 10 seconds.
+
+Save the new YAML contents and deploy the application again:
+```
+kubectl apply -f my-cd-app.yaml
+```
+
+Additionally because we have multiple pods we'll want to create a Kubernetes [Service](https://kubernetes.io/docs/concepts/services-networking/service/) to route traffic to all of them:
+```
+kubectl expose deployment my-cd-app --type=NodePort --port=8080
+```
+We've used a NodePort here, but use whatever's appropriate for your case. Make sure you can access the application if you want to check the results in your web browser.
+
+Run `kubectl get pods -w` in a terminal so we can see what happens upon deployment of the new version.
+
+Edit `my-cd-app.yaml` once again and replace the old `image` value with the "new version" application: `k8s.gcr.io/echoserver:1.4` Then redeploy: `kubectl apply -f my-cd-app.yaml`
+
+Check the other terminal to see what happened:
+```
+$ kubectl get pods -w
+NAME                         READY     STATUS    RESTARTS   AGE
+my-cd-app-7c5bd7694f-bhx2k   1/1       Running   0          1h
+my-cd-app-7c5bd7694f-c4lk5   1/1       Running   0          1h
+my-cd-app-7c5bd7694f-rg7hx   1/1       Running   0          1h
+my-cd-app-6d5bf8d76-9b4ls   0/1       Pending   0         0s
+my-cd-app-6d5bf8d76-9b4ls   0/1       Pending   0         0s
+my-cd-app-6d5bf8d76-89bwq   0/1       Pending   0         0s
+my-cd-app-6d5bf8d76-st5ks   0/1       Pending   0         0s
+my-cd-app-6d5bf8d76-st5ks   0/1       Pending   0         0s
+my-cd-app-6d5bf8d76-89bwq   0/1       Pending   0         0s
+my-cd-app-6d5bf8d76-9b4ls   0/1       ContainerCreating   0         0s
+my-cd-app-6d5bf8d76-st5ks   0/1       ContainerCreating   0         0s
+my-cd-app-6d5bf8d76-89bwq   0/1       ContainerCreating   0         0s
+my-cd-app-6d5bf8d76-9b4ls   1/1       Running   0         3s
+my-cd-app-6d5bf8d76-st5ks   1/1       Running   0         3s
+my-cd-app-6d5bf8d76-89bwq   1/1       Running   0         4s
+my-cd-app-7c5bd7694f-c4lk5   1/1       Terminating   0         1h
+my-cd-app-7c5bd7694f-rg7hx   1/1       Terminating   0         1h
+my-cd-app-7c5bd7694f-bhx2k   1/1       Terminating   0         1h
+```
+We can see that, of course, the old version went away and the new one came up. Additionally, because of our configuration, none of the old Pods terminated before the new Pods were Running. So, generally speaking, there was no downtime. This blue-green behavior is what will occur so long as there isn't resource contention in Kubernetes, in which case a rolling (e.g. one new pod at a time) update will occur instead.
+
+## What's Next?
+
+You'll likely want to do further application-specific configuration such as [container probes](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes) or [lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/). These can be helpful in making sure your application accurately reports when it's live/ready, which is important during startup and can also be important during shutdown (connection draining, etc.).
+
+If your application's needs aren't too complex, this pattern may work for you if you're aiming for continuous deployment to Kubernetes. What's great about this minimalist approach is that it's easy and only uses out-of-the-box Kubernetes functionality.
