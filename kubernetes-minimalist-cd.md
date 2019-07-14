@@ -1,4 +1,4 @@
-# Absolute Minimalist Continuous Deployment with Kubernetes
+# Minimalist Continuous Deployment with Kubernetes
 
 In this article we're going to talk about a way to use Kubernetes as the last leg for continuous deployment. This is not to say this is the _only_ way to go about continuous deployment with Kubernetes, it is simply a very minimalist (and therefore easy) approach to doing so.
 
@@ -12,8 +12,8 @@ We'll define continuous deployment, in the context of Kubernetes, as having the 
 
 We won't be creating any container images from scratch since there are images created by the community that will illustrate the behavior well enough:
 
-* gcr.io/hello-minikube-zero-install/hello-node (originally from [here](https://kubernetes.io/docs/tutorials/hello-minikube/)), which will act as the "old version" of the application
-* k8s.gcr.io/echoserver:1.4 (originally from [here](https://github.com/kubernetes/minikube/blob/master/README.md)), which will act as the "new version"
+* gcr.io/hello-minikube-zero-install/hello-node (originally from [here](https://kubernetes.io/docs/tutorials/hello-minikube/)), which will act as the "old version" of the application.
+* k8s.gcr.io/echoserver:1.4 (originally from [here](https://github.com/kubernetes/minikube/blob/master/README.md)), which will act as the "new version".
 
 The application will use a Kubernetes [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/), shown in YAML format below. Deployments have features that are essential for the behaviors we're looking for.
 ```
@@ -160,13 +160,13 @@ my-cd-app-6d5bf8d76-2g7kh   1/1       Terminating   0         35m
 ```
 As before, the existing Pod (new version) was terminated and a new Pod (old version) was created. You can use the port-forwarding to check that the result in your web browser is once again `Hello World!`.
 
-Running `kubectl get all` again shows that "new" ReplicaSet no longer has any Pods and the "old" one once again does.
+Running `kubectl get all` again shows that the "new" ReplicaSet no longer has any Pods and the "old" one once again does.
 
-This is another behavior we get for free with Deployments. This is only the most basic case, but see the [Deployments documentation](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) for many more options.
+This is another feature that comes standard with Deployments. This is only the most basic case, refer to the [Deployments documentation](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) for many more options.
 
-## Blue-Green(ish) Rollout
+## Downtime
 
-Here we're going to discuss configuration that will give us a best-effort blue-green rollout of a new version.
+Kubernetes Deployments by default perform a rolling update which avoids downtime, another great feature we get for free. We could just stop here, but as an example of the configurability of Deployments, we're going to modify this process slightly to aim for all new Pods being up before old ones are terminated.
 
 Before proceeding, delete the Deployment from Kubernetes so we can start fresh:
 ```
@@ -206,22 +206,22 @@ spec:
 ```
 Here's what's changed:
 
-* Before there was only 1 replica, but most cases would likely have more, so now there's 3.
+* Before there was only 1 replica, but most real cases would have more, so now there's 3.
 * The Deployment has a customized [RollingUpdate strategy](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-update-deployment):
   * `maxUnavailable: 0` means that we don't want any of the old Pods to go away until there are new ones that are available.
-  * `maxSurge: 100%` means that 3 Pods of the new version will be brought up even while there are 3 Pods of the old version (for a max total of 6 Pods).
-* `minReadySeconds: 10` means that the new Pods won't be considered available until they've been [ready](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes) for 10 seconds.
+  * `maxSurge: 100%` means that all the new Pods can be brought up even while all of the old Pods are still running (for a max total of 6 Pods).
+* `minReadySeconds: 10` means that the new Pods won't be considered available until they've been [ready](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes) for 10 seconds. For this period of time traffic will go to both versions.
 
 Save the new YAML contents and deploy the application again:
 ```
 kubectl apply -f my-cd-app.yaml
 ```
 
-Additionally because we have multiple pods we'll want to create a Kubernetes [Service](https://kubernetes.io/docs/concepts/services-networking/service/) to route traffic to all of them:
+Additionally because we have multiple pods we'll want to create a Kubernetes [Service](https://kubernetes.io/docs/concepts/services-networking/service/), which will route traffic to the Pods only when they're [ready](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes) (i.e. not in the process of starting or stopping):
 ```
 kubectl expose deployment my-cd-app --type=NodePort --port=8080
 ```
-We've used a NodePort here, but use whatever's appropriate for your case. Make sure you can access the application if you want to check the results in your web browser.
+We've used a NodePort here, but use whatever's appropriate for your case. Make sure you can access the application if you want to check the results in your web browser again.
 
 Run `kubectl get pods -w` in a terminal so we can see what happens upon deployment of the new version.
 
@@ -250,10 +250,12 @@ my-cd-app-7c5bd7694f-c4lk5   1/1       Terminating   0         1h
 my-cd-app-7c5bd7694f-rg7hx   1/1       Terminating   0         1h
 my-cd-app-7c5bd7694f-bhx2k   1/1       Terminating   0         1h
 ```
-We can see that, of course, the old version went away and the new one came up. Additionally, because of our configuration, none of the old Pods terminated before the new Pods were Running. So, generally speaking, there was no downtime. This blue-green behavior is what will occur so long as there isn't resource contention in Kubernetes, in which case a rolling (e.g. one new pod at a time) update will occur instead.
+As before, the old version went away and the new one came up. Additionally, because of our configuration, none of the old Pods terminated before the new Pods were running. This behavior is what will occur so long as there isn't resource contention in Kubernetes, in which case a rolling (only some Pods at a time) update will occur instead.
 
 ## What's Next?
 
 You'll likely want to do further application-specific configuration such as [container probes](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes) or [lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/). These can be helpful in making sure your application accurately reports when it's live/ready, which is important during startup and can also be important during shutdown (connection draining, etc.).
 
-If your application's needs aren't too complex, this pattern may work for you if you're aiming for continuous deployment to Kubernetes. What's great about this minimalist approach is that it's easy and only uses out-of-the-box Kubernetes functionality.
+In this approach, the two versions coexist for only a short period of time. Canarying of new features can be managed at the application level by using things like multiple code paths and feature toggles.
+
+If your application's needs aren't too complex, this may work for you if you're aiming for continuous deployment to Kubernetes. What's great about this minimalist approach is that it's easy and only requires out-of-the-box Kubernetes functionality.
