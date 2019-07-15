@@ -2,7 +2,9 @@
 
 In this article we're going to talk about a way to use Kubernetes as the last leg for continuous deployment. This is not to say this is the _only_ way to go about continuous deployment with Kubernetes, it is simply a very minimalist (and therefore easy) approach to doing so.
 
-We'll define continuous deployment, in the context of Kubernetes, as having the following behaviors upon deployment of a new version of an application:
+(**tl;dr** Use one Deployment object and take advantage of its built-in features)
+
+We'll define what we want from Kubernetes for continuous deployment as having the following behaviors upon deployment of a new version of an application:
 
 * The old version goes away automatically.
 * There is the ability to easily rollback to the old version.
@@ -120,7 +122,7 @@ BODY:
 -no body in request-
 ```
 
-The details of the output aren't important. What matters is that we were able to update to a new container image, do `kubectl apply` and the Deployment handled the rest: the new version appeared and the old version went away, automatically.
+The details of the output aren't important. What matters is that we were able to update to a new container image, do `kubectl apply` and the Deployment handled the rest; the new version appeared and the old version went away, automatically.
 
 ## Rolling Back
 
